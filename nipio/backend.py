@@ -138,7 +138,7 @@ class DynamicBackend:
                 elif qname == f'_acme-challenge.{self.domain}' and self.acme_challenge:
                     self.handle_acme(qname)
                 else:
-                    self.handle_subdomains(qname)  # FIX: Added missing function
+                    self.handle_subdomains(qname)  # FIX: Corrects subdomain handling
             elif qtype == 'SOA' and qname.endswith(self.domain):
                 self.handle_soa(qname)
             elif qtype == 'TXT' and qname == f'_acme-challenge.{self.domain}' and self.acme_challenge:
@@ -160,8 +160,10 @@ class DynamicBackend:
         parts = qname.split('.')
         if len(parts) >= 5 and parts[-4] == "instances":
             ip = parts[0].replace('-', '.')  # Convert 192-168-1-1 to 192.168.1.1
+            _log(f"Returning dynamic A record: {qname} -> {ip}")
             _write('DATA', qname, 'IN', 'A', self.ttl, self.id, ip)
         else:
+            _log(f"No matching rule for {qname}")
             _write('LOG', f'No matching rule for {qname}')
 
         _write('END')
