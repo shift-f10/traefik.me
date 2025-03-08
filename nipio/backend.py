@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-#!/usr/bin/python3
 import configparser
 import os
 import sys
@@ -22,6 +21,7 @@ def _is_debug():
     return True  # Enable debugging
 
 def _log(msg):
+    """Logs messages to stderr for debugging."""
     sys.stderr.write(f'backend ({os.getpid()}): {msg}\n')
     sys.stderr.flush()
 
@@ -68,17 +68,17 @@ class DynamicBackend:
             config.read_file(fp)
 
         self.id = config.get('soa', 'id')
-        self.soa = f"{config.get('soa', 'ns')} {config.get('soa', 'hostmaster')} {self.id}"
         self.domain = config.get('main', 'domain')
         self.ip_address = config.get('main', 'ipaddress')
         self.ttl = config.get('main', 'ttl')
 
-        if config.has_section("acme"):
-            self.acme_challenge = [entry[1] for entry in config.items("acme")]
-        
         self.name_servers = dict(config.items('nameservers'))
         self.static = dict(config.items('static')) if config.has_section("static") else {}
         self.blacklisted_ips = [entry[1] for entry in config.items("blacklist")] if config.has_section("blacklist") else []
+        self.acme_challenge = [entry[1] for entry in config.items("acme")] if config.has_section("acme") else []
+
+        # Fix SOA format with 7 required fields: primary NS, hostmaster, serial, refresh, retry, expire, minimum TTL
+        self.soa = f"{self.name_servers['ns.instances.ctrlr.io']} info.ctrlr.io {self.id} 3600 1800 1209600 3600"
 
         _log(f'Configuration Loaded:')
         _log(f'  Name servers: {self.name_servers}')
@@ -147,7 +147,7 @@ class DynamicBackend:
                 self.handle_unknown(qtype, qname)
 
     def handle_soa(self, qname):
-        """Handles SOA queries to prevent backend crashes."""
+        """Handles SOA queries correctly."""
         _log(f"Handling SOA query for {qname}")
         _write('DATA', qname, 'IN', 'SOA', self.ttl, self.id, self.soa)
         _write('END')
