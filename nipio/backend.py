@@ -18,20 +18,18 @@ import os
 import sys
 
 def _is_debug():
-    return True  # Set to True for debugging
+    return True  # Set to True to enable debug logging
 
 def _log(msg):
     sys.stderr.write(f'backend ({os.getpid()}): {msg}\n')
     sys.stderr.flush()
 
 def _write(*args):
-    for i, a in enumerate(args, 1):
-        if _is_debug():
-            _log(f'writing: {a}')
-        sys.stdout.write(a)
-        if i < len(args):
-            sys.stdout.write('\t')
-    sys.stdout.write('\n')
+    """Writes responses to PowerDNS in the expected format."""
+    response = "\t".join(args)
+    if _is_debug():
+        _log(f'writing: {response}')
+    sys.stdout.write(response + "\n")
     sys.stdout.flush()
 
 def _get_next():
@@ -39,7 +37,7 @@ def _get_next():
     line = sys.stdin.readline().strip()
     if _is_debug():
         _log(f'read line: {line if line else "<empty>"}')
-    
+
     if not line:
         return None  # Return None for empty input
     
@@ -95,14 +93,20 @@ class DynamicBackend:
     def run(self):
         """Main loop to handle PowerDNS requests."""
         _log('Starting up')
-        handshake = _get_next()
-        
-        if handshake is None or len(handshake) < 2 or handshake[1] != '1':
-            _log(f'Invalid handshake: {handshake}')
-            sys.exit(1)
 
-        _write('OK', 'We are good')
-        _log('Handshake completed')
+        # Wait for the HELO handshake
+        while True:
+            handshake = _get_next()
+            if handshake is None:
+                _log("Ignoring empty input during handshake.")
+                continue
+            if handshake[0] == "HELO" and len(handshake) > 1 and handshake[1] == '1':
+                _write('OK', 'We are good')
+                _log('Handshake completed')
+                break
+            else:
+                _log(f'Invalid handshake received: {handshake}')
+                sys.exit(1)
 
         while True:
             cmd = _get_next()
@@ -152,7 +156,11 @@ class DynamicBackend:
 
     def handle_static(self, qname):
         """Handles static DNS records."""
-        _write('DATA', qname, 'IN', 'A', self.ttl, self.id, self.static[qname])
+        if qname in self.static:
+            ip = self.static[qname]
+            _write('DATA', qname, 'IN', 'A', self.ttl, self.id, ip)
+        else:
+            _log(f"No static entry for {qname}")
         self.write_name_servers(qname)
         _write('END')
 
