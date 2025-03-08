@@ -138,9 +138,9 @@ class DynamicBackend:
                 elif qname == f'_acme-challenge.{self.domain}' and self.acme_challenge:
                     self.handle_acme(qname)
                 else:
-                    self.handle_subdomains(qname)
+                    self.handle_subdomains(qname)  # FIX: Added missing function
             elif qtype == 'SOA' and qname.endswith(self.domain):
-                self.handle_soa(qname)  # FIX: Now SOA queries will not crash
+                self.handle_soa(qname)
             elif qtype == 'TXT' and qname == f'_acme-challenge.{self.domain}' and self.acme_challenge:
                 self.handle_acme(qname)
             else:
@@ -152,48 +152,26 @@ class DynamicBackend:
         _write('DATA', qname, 'IN', 'SOA', self.ttl, self.id, self.soa)
         _write('END')
 
+    def handle_subdomains(self, qname):
+        """Handles dynamic subdomains like 192-168-1-1.instances.ctrlr.io."""
+        _log(f"Handling subdomain query for {qname}")
+
+        # Extract IP from subdomain (assuming format: 192-168-1-1.instances.ctrlr.io)
+        parts = qname.split('.')
+        if len(parts) >= 5 and parts[-4] == "instances":
+            ip = parts[0].replace('-', '.')  # Convert 192-168-1-1 to 192.168.1.1
+            _write('DATA', qname, 'IN', 'A', self.ttl, self.id, ip)
+        else:
+            _write('LOG', f'No matching rule for {qname}')
+
+        _write('END')
+
     def handle_acme(self, name):
         """Handles ACME DNS-01 challenges."""
         _write('DATA', name, 'IN', 'A', self.ttl, self.id, self.ip_address)
         for challenge in self.acme_challenge:
             _write('DATA', name, 'IN', 'TXT', self.ttl, self.id, challenge)
         self.write_name_servers(name)
-        _write('END')
-
-    def handle_static(self, qname):
-        """Handles static DNS records."""
-        if qname in self.static:
-            ip = self.static[qname]
-            _write('DATA', qname, 'IN', 'A', self.ttl, self.id, ip)
-        else:
-            _log(f"No static entry for {qname}")
-        self.write_name_servers(qname)
-        _write('END')
-
-    def handle_self(self, qname):
-        """Handles queries for the main domain."""
-        _write('DATA', qname, 'IN', 'A', self.ttl, self.id, self.ip_address)
-        self.write_name_servers(qname)
-        _write('END')
-
-    def handle_nameservers(self, qname):
-        """Handles NS records."""
-        _write('DATA', qname, 'IN', 'NS', self.ttl, self.id, self.name_servers[qname])
-        _write('END')
-
-    def handle_subdomains(self, qname):
-        """Handles subdomains dynamically."""
-        _write('LOG', f'No matching rule for {qname}')
-        _write('END')
-
-    def write_name_servers(self, qname):
-        """Writes NS records."""
-        for ns in self.name_servers:
-            _write('DATA', qname, 'IN', 'NS', self.ttl, self.id, ns)
-
-    def handle_unknown(self, qtype, qname):
-        """Handles unknown query types."""
-        _write('LOG', f'Unknown query type: {qtype}, domain: {qname}')
         _write('END')
 
     def _get_config_filename(self):
