@@ -148,13 +148,11 @@ class DynamicBackend:
             ip = parts[0].replace('-', '.')  # Convert 192-168-1-1 to 192.168.1.1
             _log(f"Returning dynamic A record: {qname} -> {ip}")
             _write('DATA', qname, 'IN', 'A', self.ttl, self.id, ip)
+            _write('END')  # Ensure END is sent after a valid response
         else:
             _log(f"No matching rule for {qname}")
             _write('LOG', f'No matching rule for {qname}')
             _write('END')
-            return
-
-        _write('END')
 
     def handle_acme(self, name):
         """Handles ACME DNS-01 challenges."""
