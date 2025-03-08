@@ -4,7 +4,7 @@ import os
 import sys
 
 def _is_debug():
-    return True  # ✅ Forced debugging enabled
+    return True  # ✅ Enable debugging
 
 def _log(msg):
     """Logs messages to stderr for debugging."""
@@ -133,20 +133,27 @@ class DynamicBackend:
         """Handles dynamic subdomains like 192-168-1-1.instances.ctrlr.io."""
         _log(f"Handling subdomain query for {qname}")
 
-        # Extract IP from subdomain (assuming format: 192-168-1-1.instances.ctrlr.io)
         parts = qname.split('.')
+        
+        # Ensure we are dealing with a subdomain under instances.ctrlr.io
         if len(parts) >= 5 and parts[-4] == "instances":
-            ip = parts[0].replace('-', '.')  # Convert 192-168-1-1 to 192.168.1.1
-            _log(f"Generated IP: {ip} for {qname}")
+            # Extract IP from the subdomain
+            ip_parts = parts[0].split('-')  # "192-168-1-1" → ['192', '168', '1', '1']
+            
+            if len(ip_parts) == 4:  # Ensure it's a valid IPv4 address structure
+                ip = ".".join(ip_parts)  # Convert to '192.168.1.1'
+                _log(f"✅ Matched dynamic A record: {qname} -> {ip}")
 
-            _log(f"✅ Sending A Record: {qname} -> {ip}")
-            _write('DATA', qname, 'IN', 'A', self.ttl, self.id, ip)
-            _write('END')  # Ensure END is sent after a valid response
-            return  # Ensure no additional processing occurs
-        else:
-            _log(f"❌ No matching rule for {qname}")
-            _write('LOG', f'No matching rule for {qname}')
-            _write('END')
+                # Send A record response
+                _write('DATA', qname, 'IN', 'A', self.ttl, self.id, ip)
+                _write('END')
+                return
+            else:
+                _log(f"❌ Invalid subdomain format for {qname}")
+
+        _log(f"❌ No matching rule for {qname}")
+        _write('LOG', f'No matching rule for {qname}')
+        _write('END')
 
     def _get_config_filename(self):
         """Returns the backend configuration filename."""
