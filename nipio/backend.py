@@ -13,19 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+#!/usr/bin/python3
 import configparser
 import os
 import sys
 
 def _is_debug():
-    return True  # Set to True to enable debug logging
+    return True  # Enable debugging
 
 def _log(msg):
     sys.stderr.write(f'backend ({os.getpid()}): {msg}\n')
     sys.stderr.flush()
 
 def _write(*args):
-    """Writes responses to PowerDNS in the expected format."""
+    """Writes responses to PowerDNS."""
     response = "\t".join(args)
     if _is_debug():
         _log(f'writing: {response}')
@@ -33,14 +34,14 @@ def _write(*args):
     sys.stdout.flush()
 
 def _get_next():
-    """Reads the next input line and handles empty input properly."""
+    """Reads and processes input from PowerDNS."""
     line = sys.stdin.readline().strip()
     if _is_debug():
         _log(f'read line: {line if line else "<empty>"}')
 
     if not line:
-        return None  # Return None for empty input
-    
+        return None  # Ignore empty lines
+
     return line.split('\t')
 
 class DynamicBackend:
@@ -56,7 +57,7 @@ class DynamicBackend:
         self.acme_challenge = []
 
     def configure(self):
-        """Loads backend configuration from a file."""
+        """Loads backend configuration."""
         fname = self._get_config_filename()
         if not os.path.exists(fname):
             _log(f'Configuration file {fname} does not exist')
@@ -91,10 +92,9 @@ class DynamicBackend:
         _log(f'  ACME challenge: {self.acme_challenge}')
 
     def run(self):
-        """Main loop to handle PowerDNS requests."""
+        """Handles PowerDNS requests."""
         _log('Starting up')
 
-        # Wait for the HELO handshake
         while True:
             handshake = _get_next()
             if handshake is None:
@@ -112,7 +112,7 @@ class DynamicBackend:
             cmd = _get_next()
             if cmd is None:
                 _log("Received empty command, ignoring.")
-                continue  # Ignore empty lines
+                continue
 
             if _is_debug():
                 _log(f"Received command: {cmd}")
@@ -132,7 +132,7 @@ class DynamicBackend:
                 if qname in self.static:
                     self.handle_static(qname)
                 elif qname == self.domain:
-                    self.handle_self(self.domain)
+                    self.handle_self(qname)
                 elif qname in self.name_servers:
                     self.handle_nameservers(qname)
                 elif qname == f'_acme-challenge.{self.domain}' and self.acme_challenge:
@@ -140,14 +140,20 @@ class DynamicBackend:
                 else:
                     self.handle_subdomains(qname)
             elif qtype == 'SOA' and qname.endswith(self.domain):
-                self.handle_soa(qname)
+                self.handle_soa(qname)  # FIX: Now SOA queries will not crash
             elif qtype == 'TXT' and qname == f'_acme-challenge.{self.domain}' and self.acme_challenge:
                 self.handle_acme(qname)
             else:
                 self.handle_unknown(qtype, qname)
 
+    def handle_soa(self, qname):
+        """Handles SOA queries to prevent backend crashes."""
+        _log(f"Handling SOA query for {qname}")
+        _write('DATA', qname, 'IN', 'SOA', self.ttl, self.id, self.soa)
+        _write('END')
+
     def handle_acme(self, name):
-        """Handles ACME DNS-01 challenge."""
+        """Handles ACME DNS-01 challenges."""
         _write('DATA', name, 'IN', 'A', self.ttl, self.id, self.ip_address)
         for challenge in self.acme_challenge:
             _write('DATA', name, 'IN', 'TXT', self.ttl, self.id, challenge)
