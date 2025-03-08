@@ -2,7 +2,7 @@
 # Copyright 2019 Exentrique Solutions Ltd
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
+# You may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
 #
 # http://www.apache.org/licenses/LICENSE-2.0
@@ -15,37 +15,35 @@
 
 import configparser
 import os
-import re
 import sys
 
 def _is_debug():
-    return False
+    return True  # Set to True for debugging
 
 def _log(msg):
     sys.stderr.write(f'backend ({os.getpid()}): {msg}\n')
+    sys.stderr.flush()
 
-def _write(*l):
-    args = len(l)
-    for i, a in enumerate(l, 1):
+def _write(*args):
+    for i, a in enumerate(args, 1):
         if _is_debug():
             _log(f'writing: {a}')
         sys.stdout.write(a)
-        if i < args:
-            if _is_debug():
-                _log('writetab')
+        if i < len(args):
             sys.stdout.write('\t')
-    if _is_debug():
-        _log('writenewline')
     sys.stdout.write('\n')
     sys.stdout.flush()
 
 def _get_next():
+    """Reads the next input line and handles empty input properly."""
+    line = sys.stdin.readline().strip()
     if _is_debug():
-        _log('reading now')
-    line = sys.stdin.readline()
-    if _is_debug():
-        _log(f'read line: {line}')
-    return line.strip().split('\t')
+        _log(f'read line: {line if line else "<empty>"}')
+    
+    if not line:
+        return None  # Return None for empty input
+    
+    return line.split('\t')
 
 class DynamicBackend:
     def __init__(self):
@@ -60,9 +58,10 @@ class DynamicBackend:
         self.acme_challenge = []
 
     def configure(self):
+        """Loads backend configuration from a file."""
         fname = self._get_config_filename()
         if not os.path.exists(fname):
-            _log(f'{fname} does not exist')
+            _log(f'Configuration file {fname} does not exist')
             sys.exit(1)
 
         config = configparser.ConfigParser()
@@ -82,36 +81,44 @@ class DynamicBackend:
         self.static = dict(config.items('static')) if config.has_section("static") else {}
         self.blacklisted_ips = [entry[1] for entry in config.items("blacklist")] if config.has_section("blacklist") else []
 
-        _log(f'Name servers: {self.name_servers}')
-        _log(f'Static resolution: {self.static}')
-        _log(f'ID: {self.id}')
-        _log(f'TTL: {self.ttl}')
-        _log(f'SOA: {self.soa}')
-        _log(f'IP Address: {self.ip_address}')
-        _log(f'DOMAIN: {self.domain}')
-        _log(f'Blacklist: {self.blacklisted_ips}')
-        _log(f'ACME challenge: {self.acme_challenge}')
+        _log(f'Configuration Loaded:')
+        _log(f'  Name servers: {self.name_servers}')
+        _log(f'  Static resolution: {self.static}')
+        _log(f'  ID: {self.id}')
+        _log(f'  TTL: {self.ttl}')
+        _log(f'  SOA: {self.soa}')
+        _log(f'  IP Address: {self.ip_address}')
+        _log(f'  DOMAIN: {self.domain}')
+        _log(f'  Blacklist: {self.blacklisted_ips}')
+        _log(f'  ACME challenge: {self.acme_challenge}')
 
     def run(self):
-        _log('starting up')
+        """Main loop to handle PowerDNS requests."""
+        _log('Starting up')
         handshake = _get_next()
-        if handshake[1] != '1':
-            _log(f'Not version 1: {handshake}')
+        
+        if handshake is None or len(handshake) < 2 or handshake[1] != '1':
+            _log(f'Invalid handshake: {handshake}')
             sys.exit(1)
+
         _write('OK', 'We are good')
-        _log('Done handshake')
+        _log('Handshake completed')
 
         while True:
             cmd = _get_next()
+            if cmd is None:
+                _log("Received empty command, ignoring.")
+                continue  # Ignore empty lines
+
             if _is_debug():
-                _log(f"cmd: {cmd}")
+                _log(f"Received command: {cmd}")
 
             if cmd[0] == "END":
-                _log("completing")
+                _log("Completing execution")
                 break
 
             if len(cmd) < 6:
-                _log(f'did not understand: {cmd}')
+                _log(f'Invalid command format: {cmd}')
                 _write('FAIL')
                 continue
 
@@ -136,6 +143,7 @@ class DynamicBackend:
                 self.handle_unknown(qtype, qname)
 
     def handle_acme(self, name):
+        """Handles ACME DNS-01 challenge."""
         _write('DATA', name, 'IN', 'A', self.ttl, self.id, self.ip_address)
         for challenge in self.acme_challenge:
             _write('DATA', name, 'IN', 'TXT', self.ttl, self.id, challenge)
@@ -143,19 +151,39 @@ class DynamicBackend:
         _write('END')
 
     def handle_static(self, qname):
+        """Handles static DNS records."""
         _write('DATA', qname, 'IN', 'A', self.ttl, self.id, self.static[qname])
         self.write_name_servers(qname)
         _write('END')
 
+    def handle_self(self, qname):
+        """Handles queries for the main domain."""
+        _write('DATA', qname, 'IN', 'A', self.ttl, self.id, self.ip_address)
+        self.write_name_servers(qname)
+        _write('END')
+
+    def handle_nameservers(self, qname):
+        """Handles NS records."""
+        _write('DATA', qname, 'IN', 'NS', self.ttl, self.id, self.name_servers[qname])
+        _write('END')
+
+    def handle_subdomains(self, qname):
+        """Handles subdomains dynamically."""
+        _write('LOG', f'No matching rule for {qname}')
+        _write('END')
+
     def write_name_servers(self, qname):
+        """Writes NS records."""
         for ns in self.name_servers:
             _write('DATA', qname, 'IN', 'NS', self.ttl, self.id, ns)
 
     def handle_unknown(self, qtype, qname):
-        _write('LOG', f'Unknown type: {qtype}, domain: {qname}')
+        """Handles unknown query types."""
+        _write('LOG', f'Unknown query type: {qtype}, domain: {qname}')
         _write('END')
 
     def _get_config_filename(self):
+        """Returns the backend configuration filename."""
         return os.path.join(os.path.dirname(os.path.realpath(__file__)), 'backend.conf')
 
 if __name__ == '__main__':
