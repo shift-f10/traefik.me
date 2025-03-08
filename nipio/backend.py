@@ -4,7 +4,7 @@ import os
 import sys
 
 def _is_debug():
-    return True  # Enable debugging
+    return True  # ✅ Forced debugging enabled
 
 def _log(msg):
     """Logs messages to stderr for debugging."""
@@ -115,16 +115,7 @@ class DynamicBackend:
             qname, qtype = cmd[1].lower(), cmd[3]
 
             if qtype in ('A', 'ANY') and qname.endswith(self.domain):
-                if qname in self.static:
-                    self.handle_static(qname)
-                elif qname == self.domain:
-                    self.handle_self(qname)
-                elif qname in self.name_servers:
-                    self.handle_nameservers(qname)
-                elif qname == f'_acme-challenge.{self.domain}' and self.acme_challenge:
-                    self.handle_acme(qname)
-                else:
-                    self.handle_subdomains(qname)  # FIX: Ensure subdomain A record is returned
+                self.handle_subdomains(qname)
             elif qtype == 'SOA' and qname.endswith(self.domain):
                 self.handle_soa(qname)
             elif qtype == 'TXT' and qname == f'_acme-challenge.{self.domain}' and self.acme_challenge:
@@ -146,22 +137,16 @@ class DynamicBackend:
         parts = qname.split('.')
         if len(parts) >= 5 and parts[-4] == "instances":
             ip = parts[0].replace('-', '.')  # Convert 192-168-1-1 to 192.168.1.1
-            _log(f"Returning dynamic A record: {qname} -> {ip}")
+            _log(f"Generated IP: {ip} for {qname}")
+
+            _log(f"✅ Sending A Record: {qname} -> {ip}")
             _write('DATA', qname, 'IN', 'A', self.ttl, self.id, ip)
-            _write('END')  # ✅ Ensure END is sent after a valid response
-            return  # ✅ Ensure no additional processing occurs
+            _write('END')  # Ensure END is sent after a valid response
+            return  # Ensure no additional processing occurs
         else:
-            _log(f"No matching rule for {qname}")
+            _log(f"❌ No matching rule for {qname}")
             _write('LOG', f'No matching rule for {qname}')
             _write('END')
-
-    def handle_acme(self, name):
-        """Handles ACME DNS-01 challenges."""
-        _write('DATA', name, 'IN', 'A', self.ttl, self.id, self.ip_address)
-        for challenge in self.acme_challenge:
-            _write('DATA', name, 'IN', 'TXT', self.ttl, self.id, challenge)
-        self.write_name_servers(name)
-        _write('END')
 
     def _get_config_filename(self):
         """Returns the backend configuration filename."""
